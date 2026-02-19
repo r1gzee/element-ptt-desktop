@@ -156,6 +156,7 @@ jobs:
               env:
                   CSC_IDENTITY_AUTO_DISCOVERY: false
                   VARIANT_PATH: variant.json
+                  DEBUG: electron-builder
 
             - name: Generate releases.json
               if: inputs.base-url

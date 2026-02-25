@@ -34,6 +34,7 @@ import "./ipc.js";
 import "./seshat.js";
 import "./settings.js";
 import "./badge.js";
+import { setupPTTIpc } from "./ptt.js";
 import * as tray from "./tray.js";
 import Store from "./store.js";
 import { buildMenuTemplate } from "./vectormenu.js";
@@ -596,6 +597,9 @@ app.on("ready", async () => {
     ); // Use Mac OS 15+ native picker
 
     setupMediaAuth(global.mainWindow);
+
+    // Register PTT IPC handlers for the global shortcut system.
+    setupPTTIpc(() => global.mainWindow ?? null);
 });
 
 app.on("window-all-closed", () => {

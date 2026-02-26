@@ -64,6 +64,9 @@ jobs:
             - name: Build TypeScript & resources
               run: pnpm run build:ts && pnpm run build:res
 
+            - name: Pack webapp into asar
+              run: pnpm run asar-webapp
+
             - name: Package with electron-builder
               env:
                   VARIANT_PATH: element.io/nexus/build.json

@@ -62,6 +62,15 @@ For the evdev backend to work, the user must be in the `input` group:
 sudo usermod -aG input $USER   # then log out/in
 ```
 
+## Code style
+
+- **Single-purpose functions**: each function does one thing. Split before it grows.
+- **No deep nesting**: flatten with early returns and extracted helpers instead of nested `if`/callbacks.
+- **Explicit over clever**: choose the readable solution, not the concise one.
+- **Name for intent**: `isFloorOccupied`, `startSpeaking` — not `flag`, `fn`, `data`.
+- **Flag functions over ~20 lines**: call it out before writing more; break it up first.
+- **No workaround stacking**: when something doesn't work, break the problem down and fix the root cause. Don't patch over errors with try/catch or conditionals that hide the real issue.
+
 ## CI workflows
 
 Three `workflow_dispatch` workflows in `.github/workflows/`:

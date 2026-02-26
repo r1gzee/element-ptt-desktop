@@ -68,6 +68,8 @@ jobs:
               run: pnpm run build:ts && pnpm run build:res
 
             - name: Package with electron-builder (unsigned)
+              env:
+                  VARIANT_PATH: element.io/nexus/build.json
               run: |
                   npx electron-builder --win nsis portable --${{ inputs.arch || 'x64' }} --publish never
 

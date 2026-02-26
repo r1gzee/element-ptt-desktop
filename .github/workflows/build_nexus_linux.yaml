@@ -67,6 +67,8 @@ jobs:
               run: pnpm run build:ts && pnpm run build:res
 
             - name: Package with electron-builder
+              env:
+                  VARIANT_PATH: element.io/nexus/build.json
               run: |
                   npx electron-builder --linux AppImage deb --${{ inputs.arch || 'x64' }} \
                     --publish never

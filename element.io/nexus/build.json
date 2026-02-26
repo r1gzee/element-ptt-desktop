@@ -1,0 +1,9 @@
+{
+    "appId": "app.nexus.desktop",
+    "name": "nexus-desktop",
+    "productName": "Nexus",
+    "description": "Nexus: secure voice and messaging",
+    "protocols": ["app.nexus.desktop", "nexus"],
+    "linux.executableName": "nexus",
+    "linux.deb.name": "nexus-desktop"
+}

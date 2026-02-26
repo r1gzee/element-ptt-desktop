@@ -1,0 +1,84 @@
+name: Build Nexus macOS (test)
+
+on:
+    workflow_dispatch:
+        inputs:
+            arch:
+                description: "Architecture"
+                required: false
+                default: "arm64"
+                type: choice
+                options:
+                    - arm64
+                    - x64
+                    - universal
+
+jobs:
+    build:
+        name: Build macOS ${{ inputs.arch || 'arm64' }}
+        runs-on: macos-14
+
+        steps:
+            - name: Checkout element-desktop
+              uses: actions/checkout@v4
+
+            - name: Checkout element-web (webapp)
+              uses: actions/checkout@v4
+              with:
+                  repository: r1gzee/element-ptt-web
+                  ref: develop
+                  path: element-web
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 10
+
+            - name: Setup Node (web)
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: element-web/.nvmrc
+                  cache: pnpm
+                  cache-dependency-path: element-web/pnpm-lock.yaml
+
+            - name: Install element-web deps
+              working-directory: element-web
+              run: pnpm install --frozen-lockfile
+
+            - name: Build element-web
+              working-directory: element-web
+              run: pnpm --filter element-web build
+
+            - name: Setup Node (desktop)
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+                  cache-dependency-path: pnpm-lock.yaml
+
+            - name: Install element-desktop deps
+              run: pnpm install --frozen-lockfile
+
+            - name: Copy webapp into desktop
+              run: |
+                  rm -rf webapp
+                  cp -r element-web/apps/web/webapp webapp
+
+            - name: Build TypeScript & resources
+              run: pnpm run build:ts && pnpm run build:res
+
+            - name: Package with electron-builder (unsigned)
+              env:
+                  CSC_IDENTITY_AUTO_DISCOVERY: false
+              run: |
+                  npx electron-builder --mac dmg --${{ inputs.arch || 'arm64' }} \
+                    --config.mac.identity=null \
+                    --publish never
+
+            - name: Upload DMG
+              uses: actions/upload-artifact@v4
+              with:
+                  name: Nexus-macOS-${{ inputs.arch || 'arm64' }}
+                  path: dist/*.dmg
+                  if-no-files-found: error
+                  retention-days: 7

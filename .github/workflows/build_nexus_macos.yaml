@@ -25,7 +25,7 @@ jobs:
             - name: Checkout element-web (webapp)
               uses: actions/checkout@v4
               with:
-                  repository: r1gzee/element-ptt-web
+                  repository: r1gzee/nexus-web
                   ref: develop
                   path: element-web
 

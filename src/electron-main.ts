@@ -35,6 +35,7 @@ import "./seshat.js";
 import "./settings.js";
 import "./badge.js";
 import { setupPTTIpc } from "./ptt.js";
+import { setupPTTHttpServer } from "./ptt-http-server.js";
 import * as tray from "./tray.js";
 import Store from "./store.js";
 import { buildMenuTemplate } from "./vectormenu.js";
@@ -617,6 +618,8 @@ app.on("ready", async () => {
 
     // Register PTT IPC handlers for the global shortcut system.
     setupPTTIpc(() => global.mainWindow ?? null);
+    // Start the localhost HTTP PTT server (cross-platform, works on Wayland).
+    setupPTTHttpServer(() => global.mainWindow ?? null);
 });
 
 app.on("window-all-closed", () => {

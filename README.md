@@ -1,176 +1,131 @@
-![Build](https://github.com/vector-im/element-desktop/actions/workflows/build.yaml/badge.svg)
-![Static Analysis](https://github.com/vector-im/element-desktop/actions/workflows/static_analysis.yaml/badge.svg)
-[![Localazy](https://img.shields.io/endpoint?url=https%3A%2F%2Fconnect.localazy.com%2Fstatus%2Felement-web%2Fdata%3Fcontent%3Dall%26title%3Dlocalazy%26logo%3Dtrue)](https://localazy.com/p/element-web)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=element-desktop&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=element-desktop)
-[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=element-desktop&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=element-desktop)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=element-desktop&metric=bugs)](https://sonarcloud.io/summary/new_code?id=element-desktop)
+# Nexus Desktop
 
-# Element Desktop
+Nexus is a fork of [Element Desktop](https://github.com/element-hq/element-desktop) — an Electron wrapper for a Matrix client — with a built-in **Push-to-Talk (PTT)** voice channel system that works globally on Wayland, X11, and other platforms.
 
-Element Desktop is a Matrix client for desktop platforms with Element Web at its core.
+The webapp is provided by [element-ptt-web](https://github.com/r1gzee/element-ptt-web).
 
-# First Steps
+---
 
-Before you do anything else, fetch the dependencies:
+## PTT backends
 
+Global key capture is tried in priority order at runtime when you join a voice channel:
+
+| Priority | Backend | When it activates |
+|----------|---------|-------------------|
+| 1 | **evdev** | Linux; reads `/dev/input/event*` directly. Works on Wayland and X11. Requires the user to be in the `input` group. |
+| 2 | **uiohook-napi** | X11 only fallback (installed as an optional dependency). |
+| 3 | **globalShortcut** | Last resort; only fires when the Electron window is focused. |
+
+Additionally, an HTTP server listens on `http://127.0.0.1:7700` at launch. This lets any window manager or script trigger PTT without needing global key capture:
+
+```bash
+curl -X POST http://127.0.0.1:7700/ptt/down   # key down
+curl -X POST http://127.0.0.1:7700/ptt/up     # key up
 ```
+
+This is the recommended approach for Wayland compositors (Sway, Hyprland, KDE, GNOME) that can bind arbitrary shell commands to keys.
+
+### Wayland evdev setup
+
+For the evdev backend to work, add your user to the `input` group and re-login:
+
+```bash
+sudo usermod -aG input $USER
+# log out and back in, then verify:
+groups   # should include 'input'
+```
+
+---
+
+## Development
+
+### Prerequisites
+
+- Node 22+
+- pnpm 10+
+
+### Install
+
+```bash
 pnpm install
 ```
 
-# Fetching Element
+### Populate the webapp
 
-Since this package is just the Electron wrapper for Element Web, it doesn't contain any of the Element Web code,
-so the first step is to get a working copy of Element Web. There are a few ways of doing this:
+The desktop app needs a built copy of the webapp from [element-ptt-web](https://github.com/r1gzee/element-ptt-web).
 
-```
-# Fetch the prebuilt release Element package from the element-web GitHub releases page. The version
-# fetched will be the same as the local element-desktop package.
-# We're explicitly asking for no config, so the packaged Element will have no config.json.
-pnpm run fetch --noverify --cfgdir ""
-```
+```bash
+# Symlink for development (changes in element-web reflect immediately after rebuild)
+ln -s ../element-web/apps/web/webapp webapp
 
-...or if you'd like to use GPG to verify the downloaded package:
-
-```
-# Fetch the Element public key from the element.io web server over a secure connection and import
-# it into your local GPG keychain (you'll need GPG installed). You only need to to do this
-# once.
-pnpm run fetch --importkey
-# Fetch the package and verify the signature
-pnpm run fetch --cfgdir ""
+# Or copy a built webapp
+rm -rf webapp && cp -r ../element-web/apps/web/webapp webapp
 ```
 
-...or either of the above, but fetching a specific version of Element:
+### Run locally
 
-```
-# Fetch the prebuilt release Element package from the element-web GitHub releases page. The version
-# fetched will be the same as the local element-desktop package.
-pnpm run fetch --noverify --cfgdir "" v1.5.6
-```
-
-If you only want to run the app locally and don't need to build packages, you can
-provide the `webapp` directory directly:
-
-```
-# Assuming you've checked out and built a copy of element-web in ../element-web.
-# Note that you will not be able to `pnpm build` after this, but `pnpm start`
-# will work fine.
-ln -s ../element-web/webapp ./
-```
-
-[TODO: add support for fetching develop builds, arbitrary URLs and arbitrary paths]
-
-# Building
-
-## Native Build
-
-TODO: List native pre-requisites
-
-Optionally, [build the native modules](https://github.com/vector-im/element-desktop/blob/develop/docs/native-node-modules.md),
-which include support for searching in encrypted rooms and secure storage. Skipping this step is fine, you just won't have those features.
-
-Then, run
-
-```
-pnpm run build
-```
-
-This will do a couple of things:
-
-- Run the `setversion` script to set the local package version to match whatever
-  version of Element you installed above.
-- Run electron-builder to build a package. The package built will match the operating system
-  you're running the build process on.
-
-## Docker
-
-Alternatively, you can also build using docker, which will always produce the linux package:
-
-```
-# Run this once to make the docker image
-pnpm run docker:setup
-
-pnpm run docker:install
-# if you want to build the native modules (this will take a while)
-pnpm run docker:build:native
-pnpm run docker:build
-```
-
-After running, the packages should be in `dist/`.
-
-# Starting
-
-If you'd just like to run the electron app locally for development:
-
-```
+```bash
 pnpm start
 ```
 
-# Config
-
-If you'd like the packaged Element to have a configuration file, you can create a
-config directory and place `config.json` in there, then specify this directory
-with the `--cfgdir` option to `pnpm run fetch`, eg:
+This builds the TypeScript, copies resources, then launches Electron. Check the terminal output for the PTT backend that was selected:
 
 ```
-mkdir myconfig
-cp /path/to/my/config.json myconfig/
-pnpm run fetch --cfgdir myconfig
+PTT: using evdev backend       ← Wayland/Linux (best)
+PTT: using uiohook backend     ← X11 fallback
+PTT: using globalShortcut fallback (focus-only)
+PTT: HTTP server listening on http://127.0.0.1:7700
 ```
 
-The config dir for the official Element app is in `element.io`. If you use this,
-your app will auto-update itself using builds from element.io.
+---
 
-# Profiles
+## Building distributables
 
-To run multiple instances of the desktop app for different accounts, you can
-launch the executable with the `--profile` argument followed by a unique
-identifier, e.g `element-desktop --profile Work` for it to run a separate profile and
-not interfere with the default one.
+### CI (recommended)
 
-Alternatively, a custom location for the profile data can be specified using the
-`--profile-dir` flag followed by the desired path.
+Three `workflow_dispatch` workflows are available in `.github/workflows/`:
 
-# User-specified config.json
+| Workflow | Runner | Output |
+|----------|--------|--------|
+| `build_nexus_linux.yaml` | `ubuntu-22.04` | `.AppImage`, `.deb` |
+| `build_nexus_macos.yaml` | `macos-14` (M1, unsigned) | `.dmg` |
+| `build_nexus_windows.yaml` | `windows-latest` (unsigned) | `.exe` |
 
-- `%APPDATA%\$NAME\config.json` on Windows
-- `$XDG_CONFIG_HOME/$NAME/config.json` or `~/.config/$NAME/config.json` on Linux
-- `~/Library/Application Support/$NAME/config.json` on macOS
+Trigger from the **Actions** tab → select workflow → **Run workflow** on `develop`.
 
-In the paths above, `$NAME` is typically `Element`, unless you use `--profile
-$PROFILE` in which case it becomes `Element-$PROFILE`, or it is using one of
-the above created by a pre-1.7 install, in which case it will be `Riot` or
-`Riot-$PROFILE`.
+### Local (Linux)
 
-You may also specify a different path entirely for the `config.json` file by
-providing the `--config $YOUR_CONFIG_JSON_FILE` to the process, or via the
-`ELEMENT_DESKTOP_CONFIG_JSON` environment variable.
+```bash
+VARIANT_PATH=element.io/nexus/build.json pnpm run build:ts && pnpm run build:res
+pnpm run asar-webapp
+VARIANT_PATH=element.io/nexus/build.json npx electron-builder --linux AppImage deb --publish never
+# Output: dist/Nexus-<version>.AppImage, dist/nexus-desktop_<version>_amd64.deb
+```
 
-# Translations
+---
 
-To add a new translation, head to the [translating doc](https://github.com/vector-im/element-web/blob/develop/docs/translating.md).
+## Profiles
 
-For a developer guide, see the [translating dev doc](https://github.com/vector-im/element-web/blob/develop/docs/translating-dev.md).
+Run multiple instances for different accounts:
 
-# Report bugs & give feedback
+```bash
+nexus-desktop --profile Work
+```
 
-If you run into any bugs or have feedback you'd like to share, please let us know on GitHub.
+Or specify a custom profile directory:
 
-To help avoid duplicate issues, please [view existing issues](https://github.com/vector-im/element-web/issues?q=is%3Aopen+is%3Aissue+sort%3Areactions-%2B1-desc) first (and add a +1) or [create a new issue](https://github.com/vector-im/element-web/issues/new/choose) if you can't find it. Please note that this issue tracker is associated with the [element-web](https://github.com/vector-im/element-web) repo, but is also applied to the code in this repo as well.
+```bash
+nexus-desktop --profile-dir /path/to/profile
+```
+
+---
 
 ## Copyright & License
 
+Nexus is a fork of Element Desktop.
+
 Copyright (c) 2016-2017 OpenMarket Ltd
-
 Copyright (c) 2017 Vector Creations Ltd
-
 Copyright (c) 2017-2025 New Vector Ltd
 
-This software is multi licensed by New Vector Ltd (Element). It can be used either:
-
-(1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
-
-(2) for free under the terms of the GNU General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
-
-(3) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
-Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
+This software is multi-licensed under AGPL-3.0, GPL-3.0, or a commercial Element license. See [LICENSE files](LICENSE) for details.

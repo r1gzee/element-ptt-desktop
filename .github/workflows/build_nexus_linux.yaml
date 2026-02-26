@@ -34,7 +34,7 @@ jobs:
             - name: Setup Node (web)
               uses: actions/setup-node@v4
               with:
-                  node-version-file: element-web/.nvmrc
+                  node-version: "22"
                   cache: pnpm
                   cache-dependency-path: element-web/pnpm-lock.yaml
 
@@ -49,7 +49,7 @@ jobs:
             - name: Setup Node (desktop)
               uses: actions/setup-node@v4
               with:
-                  node-version-file: .nvmrc
+                  node-version: "22"
                   cache: pnpm
                   cache-dependency-path: pnpm-lock.yaml
 

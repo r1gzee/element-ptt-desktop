@@ -115,31 +115,97 @@ const EV_KEY = 1;
 function findKeyboardDevices(): string[] {
     try {
         const raw = fs.readFileSync("/proc/bus/input/devices", "utf8");
-        const devices: string[] = [];
-        let currentHandlers = "";
-        let isKeyboard = false;
-
-        for (const line of raw.split("\n")) {
-            if (line.startsWith("B: EV=")) {
-                // EV bitmap — bit 1 = EV_KEY, bit 17 = EV_REP (key repeat = keyboard)
-                const evBits = parseInt(line.split("=")[1], 16);
-                isKeyboard = (evBits & 0x20002) === 0x20002; // has both EV_KEY and EV_REP
-            } else if (line.startsWith("H: Handlers=")) {
-                currentHandlers = line;
-            } else if (line.trim() === "" && isKeyboard && currentHandlers) {
-                const match = currentHandlers.match(/event\d+/g);
-                if (match) {
-                    for (const ev of match) {
-                        devices.push(path.join("/dev/input", ev));
-                    }
-                }
-                isKeyboard = false;
-                currentHandlers = "";
-            }
-        }
-        return devices;
+        return parseKeyboardDevicesFromProcEntry(raw);
     } catch {
         return [];
+    }
+}
+
+function parseKeyboardDevicesFromProcEntry(raw: string): string[] {
+    const devices: string[] = [];
+    let currentHandlers = "";
+    let isKeyboard = false;
+
+    for (const line of raw.split("\n")) {
+        if (line.startsWith("B: EV=")) {
+            // EV bitmap — bit 1 = EV_KEY, bit 17 = EV_REP (key repeat = keyboard)
+            const evBits = parseInt(line.split("=")[1], 16);
+            isKeyboard = (evBits & 0x20002) === 0x20002;
+        } else if (line.startsWith("H: Handlers=")) {
+            currentHandlers = line;
+        } else if (line.trim() === "" && isKeyboard && currentHandlers) {
+            const match = currentHandlers.match(/event\d+/g);
+            if (match) {
+                for (const ev of match) devices.push(path.join("/dev/input", ev));
+            }
+            isKeyboard = false;
+            currentHandlers = "";
+        }
+    }
+    return devices;
+}
+
+interface EvdevEvent {
+    type: number;
+    code: number;
+    value: number;
+}
+
+/** Parse one struct input_event from a 24-byte buffer slice. */
+function parseEvdevEvent(buf: Buffer, offset: number): EvdevEvent {
+    return {
+        type: buf.readUInt16LE(offset + 16),
+        code: buf.readUInt16LE(offset + 18),
+        value: buf.readInt32LE(offset + 20),
+    };
+}
+
+function dispatchEvdevEvent(event: EvdevEvent, getKey: () => string | null, getWin: () => BrowserWindow | null): void {
+    if (event.type !== EV_KEY) return;
+
+    const key = getKey();
+    const win = getWin();
+    if (!key || !win) return;
+
+    const expectedCode = DOM_CODE_TO_EVDEV[key];
+    if (expectedCode === undefined || event.code !== expectedCode) return;
+
+    if (event.value === 1 || event.value === 2) {
+        handleKeyDown(win);
+    } else if (event.value === 0) {
+        handleKeyUp(win);
+    }
+}
+
+function createEvdevStreamForDevice(
+    devPath: string,
+    getKey: () => string | null,
+    getWin: () => BrowserWindow | null,
+): fs.ReadStream | null {
+    try {
+        // Verify readability synchronously before creating the stream.
+        // fs.createReadStream defers open(), so errors only surface asynchronously.
+        // fs.accessSync fails immediately if we lack read permission.
+        fs.accessSync(devPath, fs.constants.R_OK);
+
+        const stream = fs.createReadStream(devPath);
+        let buf = Buffer.alloc(0);
+
+        stream.on("data", (chunk: Buffer) => {
+            buf = Buffer.concat([buf, chunk]);
+            while (buf.length >= EVDEV_EVENT_SIZE) {
+                dispatchEvdevEvent(parseEvdevEvent(buf, 0), getKey, getWin);
+                buf = buf.subarray(EVDEV_EVENT_SIZE);
+            }
+        });
+
+        stream.on("error", () => {
+            // Device removed / closed after open — silently ignore
+        });
+
+        return stream;
+    } catch {
+        return null;
     }
 }
 
@@ -150,63 +216,14 @@ function setupEvdev(getKey: () => string | null, getWin: () => BrowserWindow | n
     const devices = findKeyboardDevices();
     if (devices.length === 0) return null;
 
-    const streams: fs.ReadStream[] = [];
-    let anyOpened = false;
+    const streams = devices
+        .map((devPath) => createEvdevStreamForDevice(devPath, getKey, getWin))
+        .filter((stream): stream is fs.ReadStream => stream !== null);
 
-    for (const devPath of devices) {
-        try {
-            // Verify readability synchronously before creating the stream.
-            // fs.createReadStream defers the open() call, so errors only surface
-            // asynchronously — meaning anyOpened would be set even if the file
-            // is not accessible.  fs.accessSync fails immediately if we lack
-            // read permission (e.g. not in the `input` group).
-            fs.accessSync(devPath, fs.constants.R_OK);
-
-            const stream = fs.createReadStream(devPath);
-            let buf = Buffer.alloc(0);
-
-            stream.on("data", (chunk: Buffer) => {
-                buf = Buffer.concat([buf, chunk]);
-                while (buf.length >= EVDEV_EVENT_SIZE) {
-                    const type = buf.readUInt16LE(16);
-                    const code = buf.readUInt16LE(18);
-                    const value = buf.readInt32LE(20);
-                    buf = buf.subarray(EVDEV_EVENT_SIZE);
-
-                    if (type !== EV_KEY) continue;
-
-                    const key = getKey();
-                    const win = getWin();
-                    if (!key || !win) continue;
-
-                    const expectedCode = DOM_CODE_TO_EVDEV[key];
-                    if (expectedCode === undefined || code !== expectedCode) continue;
-
-                    if (value === 1 || value === 2) {
-                        // keydown or key-repeat
-                        handleKeyDown(win);
-                    } else if (value === 0) {
-                        // keyup — exact, no watchdog needed
-                        handleKeyUp(win);
-                    }
-                }
-            });
-
-            stream.on("error", () => {
-                // Device removed / closed after open — silently ignore
-            });
-
-            streams.push(stream);
-            anyOpened = true;
-        } catch {
-            // skip unreadable devices
-        }
-    }
-
-    if (!anyOpened) return null;
+    if (streams.length === 0) return null;
 
     return () => {
-        for (const s of streams) s.destroy();
+        for (const stream of streams) stream.destroy();
     };
 }
 
@@ -248,20 +265,20 @@ function setupUiohook(getKey: () => string | null, getWin: () => BrowserWindow |
     const matchesKey = (keycode: number): boolean => {
         const key = getKey();
         if (!key) return false;
-        const acc = codeToAccelerator(key);
+        const accelerator = codeToAccelerator(key);
         const name = (UiohookKey as unknown as Record<number, string | undefined>)[keycode];
-        return !!name && acc.toLowerCase() === name.toLowerCase();
+        return !!name && accelerator.toLowerCase() === name.toLowerCase();
     };
 
-    uiohook.uIOhook.on("keydown", (e) => {
+    uiohook.uIOhook.on("keydown", (event) => {
         const win = getWin();
-        if (!win || !matchesKey(e.keycode)) return;
+        if (!win || !matchesKey(event.keycode)) return;
         handleKeyDown(win);
     });
 
-    uiohook.uIOhook.on("keyup", (e) => {
+    uiohook.uIOhook.on("keyup", (event) => {
         const win = getWin();
-        if (!win || !matchesKey(e.keycode)) return;
+        if (!win || !matchesKey(event.keycode)) return;
         handleKeyUp(win);
     });
 
@@ -285,57 +302,59 @@ function setupGlobalShortcut(key: string, win: BrowserWindow): void {
 }
 
 // ---------------------------------------------------------------------------
+// Backend selection
+// ---------------------------------------------------------------------------
+
+interface BackendState {
+    ready: boolean;
+    evdevCleanup: (() => void) | null;
+}
+
+function selectBackend(state: BackendState, key: string, getMainWindow: () => BrowserWindow | null): void {
+    if (state.ready) return;
+
+    state.evdevCleanup = setupEvdev(() => pttKey, getMainWindow);
+    if (state.evdevCleanup) {
+        console.log("PTT: using evdev backend");
+        state.ready = true;
+        return;
+    }
+
+    if (setupUiohook(() => pttKey, getMainWindow)) {
+        console.log("PTT: using uiohook backend");
+        state.ready = true;
+        return;
+    }
+
+    console.warn("PTT: using globalShortcut fallback (focus-only)");
+    const win = getMainWindow();
+    if (win) setupGlobalShortcut(key, win);
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 export function setupPTTIpc(getMainWindow: () => BrowserWindow | null): void {
-    let backendReady = false;
-    let evdevCleanup: (() => void) | null = null;
+    const backend: BackendState = { ready: false, evdevCleanup: null };
 
     ipcMain.on("ptt-register", (_event, key: string) => {
         const win = getMainWindow();
         if (!win) return;
 
-        // Disable Chromium's background throttling so that webContents.send()
-        // delivers IPC messages promptly even when the window is not focused.
-        // Without this, global key events from evdev are silently delayed or
-        // dropped when the renderer process is throttled.
+        // Disable background throttling so IPC delivers promptly when unfocused.
         win.webContents.setBackgroundThrottling(false);
 
         pttKey = key;
-
-        if (!backendReady) {
-            // 1. Try evdev (Wayland + X11)
-            evdevCleanup = setupEvdev(() => pttKey, getMainWindow);
-            if (evdevCleanup) {
-                console.log("PTT: using evdev backend");
-                backendReady = true;
-            }
-
-            // 2. Try uiohook (X11 only)
-            if (!backendReady && setupUiohook(() => pttKey, getMainWindow)) {
-                console.log("PTT: using uiohook backend");
-                backendReady = true;
-            }
-
-            // 3. globalShortcut fallback
-            if (!backendReady) {
-                console.warn("PTT: using globalShortcut fallback (focus-only)");
-            }
-        }
-
-        if (!backendReady) {
-            setupGlobalShortcut(key, win);
-        }
+        selectBackend(backend, key, getMainWindow);
     });
 
     ipcMain.on("ptt-unregister", () => {
         pttKey = null;
         isSpeaking = false;
         clearReleaseTimer();
-        if (!backendReady) {
-            globalShortcut.unregisterAll();
-        }
+        if (!backend.ready) globalShortcut.unregisterAll();
+
         // Re-enable throttling once PTT is no longer active.
         const win = getMainWindow();
         if (win) win.webContents.setBackgroundThrottling(true);

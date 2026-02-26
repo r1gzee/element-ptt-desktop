@@ -33,6 +33,10 @@ const CHANNELS = [
     "homeserverUrl",
     "serverSupportedVersions",
     "showToast",
+    "ptt-register",
+    "ptt-unregister",
+    "ptt-keydown",
+    "ptt-keyup",
 ];
 
 contextBridge.exposeInMainWorld("electron", {

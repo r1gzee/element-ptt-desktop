@@ -31,8 +31,7 @@ export default class ProtocolHandler {
         if (app.isPackaged) {
             app.setAsDefaultProtocolClient(this.protocol, process.execPath, args);
             app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, process.execPath, args);
-        } else if (process.platform === "win32") {
-            // on Mac/Linux this would just cause the electron binary to open
+        } else if (process.platform === "win32" || process.platform === "linux") {
             // special handler for running without being packaged, e.g `electron .` by passing our app path to electron
             app.setAsDefaultProtocolClient(this.protocol, process.execPath, [app.getAppPath(), ...args]);
             app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, process.execPath, [app.getAppPath(), ...args]);
@@ -66,7 +65,7 @@ export default class ProtocolHandler {
         };
     };
 
-    private processUrl(url: string): void {
+    public processUrl(url: string): void {
         if (!global.mainWindow) return;
 
         const parsed = new URL(url);

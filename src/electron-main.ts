@@ -422,6 +422,15 @@ app.on("ready", async () => {
         });
     });
 
+    // Handle SSO redirect protocol (io.element.desktop:// and element://) inside the webview
+    for (const scheme of [buildConfig.protocol, "element"]) {
+        protocol.handle(scheme, (request) => {
+            protocolHandler.processUrl(request.url);
+            // Return empty response — processUrl will loadURL the main window
+            return new Response(null, { status: 200 });
+        });
+    }
+
     // Minimist parses `--no-`-prefixed arguments as booleans with value `false` rather than verbatim.
     if (argv["update"] === false) {
         console.log("Auto update disabled via command line flag");
@@ -480,6 +489,14 @@ app.on("ready", async () => {
     }
 
     void global.mainWindow.loadURL("vector://vector/webapp/");
+
+    // Intercept SSO protocol redirects that happen inside the webview (Linux dev mode)
+    global.mainWindow.webContents.on("will-navigate", (event, url) => {
+        if (url.startsWith(buildConfig.protocol + ":") || url.startsWith("element:")) {
+            event.preventDefault();
+            protocolHandler.processUrl(url);
+        }
+    });
 
     if (process.platform === "darwin") {
         setupMacosTitleBar(global.mainWindow);

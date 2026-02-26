@@ -1,6 +1,6 @@
 {
     "name": "element-desktop",
-    "productName": "Element",
+    "productName": "Nexus",
     "main": "lib/electron-main.js",
     "exports": "./lib/electron-main.js",
     "version": "1.12.11",

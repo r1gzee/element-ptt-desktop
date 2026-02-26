@@ -47,6 +47,10 @@ contextBridge.exposeInMainWorld("electron", {
         }
         ipcRenderer.on(channel, listener);
     },
+    off(channel: string, listener: (event: IpcRendererEvent, ...args: any[]) => void): void {
+        if (!CHANNELS.includes(channel)) return;
+        ipcRenderer.removeListener(channel, listener);
+    },
     send(channel: string, ...args: any[]): void {
         if (!CHANNELS.includes(channel)) {
             console.error(`Unknown IPC channel ${channel} ignored`);

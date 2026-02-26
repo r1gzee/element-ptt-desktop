@@ -155,6 +155,13 @@ function setupEvdev(getKey: () => string | null, getWin: () => BrowserWindow | n
 
     for (const devPath of devices) {
         try {
+            // Verify readability synchronously before creating the stream.
+            // fs.createReadStream defers the open() call, so errors only surface
+            // asynchronously — meaning anyOpened would be set even if the file
+            // is not accessible.  fs.accessSync fails immediately if we lack
+            // read permission (e.g. not in the `input` group).
+            fs.accessSync(devPath, fs.constants.R_OK);
+
             const stream = fs.createReadStream(devPath);
             let buf = Buffer.alloc(0);
 
@@ -186,7 +193,7 @@ function setupEvdev(getKey: () => string | null, getWin: () => BrowserWindow | n
             });
 
             stream.on("error", () => {
-                // Device not readable (permission denied etc.) — silently skip
+                // Device removed / closed after open — silently ignore
             });
 
             streams.push(stream);
@@ -289,6 +296,12 @@ export function setupPTTIpc(getMainWindow: () => BrowserWindow | null): void {
         const win = getMainWindow();
         if (!win) return;
 
+        // Disable Chromium's background throttling so that webContents.send()
+        // delivers IPC messages promptly even when the window is not focused.
+        // Without this, global key events from evdev are silently delayed or
+        // dropped when the renderer process is throttled.
+        win.webContents.setBackgroundThrottling(false);
+
         pttKey = key;
 
         if (!backendReady) {
@@ -323,5 +336,8 @@ export function setupPTTIpc(getMainWindow: () => BrowserWindow | null): void {
         if (!backendReady) {
             globalShortcut.unregisterAll();
         }
+        // Re-enable throttling once PTT is no longer active.
+        const win = getMainWindow();
+        if (win) win.webContents.setBackgroundThrottling(true);
     });
 }

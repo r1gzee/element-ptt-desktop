@@ -81,5 +81,6 @@ jobs:
                   path: |
                       dist/*.AppImage
                       dist/*.deb
+                      scripts/install-appimage.sh
                   if-no-files-found: error
                   retention-days: 7

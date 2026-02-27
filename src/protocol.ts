@@ -27,18 +27,29 @@ export default class ProtocolHandler {
         // get all args except `hidden` as it'd mean the app would not get focused
         // XXX: passing args to protocol handlers only works on Windows, so unpackaged deep-linking
         // --profile/--profile-dir are passed via the SEARCH_PARAM var in the callback url
-        const args = process.argv.slice(1).filter((arg) => arg !== "--hidden" && arg !== "-hidden");
-        // On Linux AppImages, process.execPath is a temp mount point that vanishes after the app
-        // closes, so XDG registrations pointing to it break SSO callbacks on next launch.
-        // APPIMAGE is set by the AppImage runtime to the actual .AppImage file path.
-        const execPath = process.env.APPIMAGE ?? process.execPath;
-        if (app.isPackaged) {
-            app.setAsDefaultProtocolClient(this.protocol, execPath, args);
-            app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, execPath, args);
-        } else if (process.platform === "win32" || process.platform === "linux") {
-            // special handler for running without being packaged, e.g `electron .` by passing our app path to electron
-            app.setAsDefaultProtocolClient(this.protocol, process.execPath, [app.getAppPath(), ...args]);
-            app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, process.execPath, [app.getAppPath(), ...args]);
+        // Register protocol handlers after ready — calling setAsDefaultProtocolClient before
+        // app.whenReady() can silently fail on Linux because the XDG/desktop integration
+        // hasn't been initialised yet.
+        const registerProtocols = (): void => {
+            const args = process.argv.slice(1).filter((arg) => arg !== "--hidden" && arg !== "-hidden");
+            // On Linux AppImages, process.execPath is a temp mount point that vanishes after the
+            // app closes, breaking XDG registrations on the next launch.
+            // APPIMAGE is set by the AppImage runtime to the real .AppImage file path.
+            const execPath = process.env.APPIMAGE ?? process.execPath;
+            if (app.isPackaged) {
+                app.setAsDefaultProtocolClient(this.protocol, execPath, args);
+                app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, execPath, args);
+            } else if (process.platform === "win32" || process.platform === "linux") {
+                // special handler for running without being packaged, e.g `electron .`
+                app.setAsDefaultProtocolClient(this.protocol, process.execPath, [app.getAppPath(), ...args]);
+                app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, process.execPath, [app.getAppPath(), ...args]);
+            }
+        };
+
+        if (app.isReady()) {
+            registerProtocols();
+        } else {
+            app.whenReady().then(registerProtocols);
         }
 
         if (process.platform === "darwin") {

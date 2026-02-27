@@ -228,8 +228,53 @@ function setupEvdev(getKey: () => string | null, getWin: () => BrowserWindow | n
 }
 
 // ---------------------------------------------------------------------------
-// uiohook-napi backend (X11 fallback)
+// uiohook-napi backend (Windows / X11 fallback)
 // ---------------------------------------------------------------------------
+
+/**
+ * DOM KeyboardEvent.code → uiohook-napi keycode.
+ *
+ * uiohook uses its own keycode scheme (derived from Linux evdev / HID) that
+ * does NOT match the UiohookKey enum names for modifier keys
+ * (e.g. UiohookKey.Ctrl = 29, but the DOM code is "ControlLeft").
+ * A direct lookup avoids the name-comparison mismatch entirely.
+ */
+const DOM_CODE_TO_UIOHOOK: Record<string, number> = {
+    Space: 57,
+    Enter: 28,
+    Escape: 1,
+    Tab: 15,
+    Backspace: 14,
+    CapsLock: 58,
+    Backquote: 41,
+    Minus: 12,
+    Equal: 13,
+    BracketLeft: 26,
+    BracketRight: 27,
+    Backslash: 43,
+    Semicolon: 39,
+    Quote: 40,
+    Comma: 51,
+    Period: 52,
+    Slash: 53,
+    ShiftLeft: 42,
+    ShiftRight: 54,
+    ControlLeft: 29,
+    ControlRight: 3613,
+    AltLeft: 56,
+    AltRight: 3640,
+    MetaLeft: 3675,
+    MetaRight: 3676,
+    KeyA: 30, KeyB: 48, KeyC: 46, KeyD: 32, KeyE: 18,
+    KeyF: 33, KeyG: 34, KeyH: 35, KeyI: 23, KeyJ: 36,
+    KeyK: 37, KeyL: 38, KeyM: 50, KeyN: 49, KeyO: 24,
+    KeyP: 25, KeyQ: 16, KeyR: 19, KeyS: 31, KeyT: 20,
+    KeyU: 22, KeyV: 47, KeyW: 17, KeyX: 45, KeyY: 21, KeyZ: 44,
+    Digit0: 11, Digit1: 2, Digit2: 3, Digit3: 4, Digit4: 5,
+    Digit5: 6,  Digit6: 7, Digit7: 8, Digit8: 9, Digit9: 10,
+    F1: 59, F2: 60, F3: 61, F4: 62, F5: 63,
+    F6: 64, F7: 65, F8: 66, F9: 67, F10: 68, F11: 87, F12: 88,
+};
 
 function tryLoadUiohook(): typeof import("uiohook-napi") | null {
     try {
@@ -240,34 +285,14 @@ function tryLoadUiohook(): typeof import("uiohook-napi") | null {
     }
 }
 
-function codeToAccelerator(code: string): string {
-    const map: Record<string, string> = {
-        Space: "Space", AltLeft: "Alt", AltRight: "Alt",
-        ShiftLeft: "Shift", ShiftRight: "Shift",
-        ControlLeft: "Control", ControlRight: "Control",
-        MetaLeft: "Super", MetaRight: "Super",
-        Backquote: "`", Minus: "-", Equal: "=",
-        BracketLeft: "[", BracketRight: "]", Backslash: "\\",
-        Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/",
-    };
-    if (map[code]) return map[code];
-    if (code.startsWith("Key")) return code.slice(3);
-    if (code.startsWith("Digit")) return code.slice(5);
-    return code;
-}
-
 function setupUiohook(getKey: () => string | null, getWin: () => BrowserWindow | null): boolean {
     const uiohook = tryLoadUiohook();
     if (!uiohook) return false;
 
-    const { UiohookKey } = uiohook;
-
     const matchesKey = (keycode: number): boolean => {
         const key = getKey();
         if (!key) return false;
-        const accelerator = codeToAccelerator(key);
-        const name = (UiohookKey as unknown as Record<number, string | undefined>)[keycode];
-        return !!name && accelerator.toLowerCase() === name.toLowerCase();
+        return DOM_CODE_TO_UIOHOOK[key] === keycode;
     };
 
     uiohook.uIOhook.on("keydown", (event) => {
@@ -291,12 +316,42 @@ function setupUiohook(getKey: () => string | null, getWin: () => BrowserWindow |
 }
 
 // ---------------------------------------------------------------------------
-// globalShortcut fallback (key-repeat watchdog; Wayland focus-only)
+// globalShortcut fallback (key-repeat watchdog; Wayland/Windows focus-aware)
 // ---------------------------------------------------------------------------
+
+/**
+ * Convert a DOM KeyboardEvent.code to an Electron globalShortcut accelerator.
+ * Modifier-only keys (Ctrl, Shift, Alt, Meta) cannot be registered as standalone
+ * global shortcuts in Electron — log a warning and skip registration for those.
+ */
+function codeToAccelerator(code: string): string | null {
+    const modifiers: Record<string, null> = {
+        ControlLeft: null, ControlRight: null,
+        ShiftLeft: null, ShiftRight: null,
+        AltLeft: null, AltRight: null,
+        MetaLeft: null, MetaRight: null,
+    };
+    if (code in modifiers) return null;
+
+    const map: Record<string, string> = {
+        Space: "Space",
+        Backquote: "`", Minus: "-", Equal: "=",
+        BracketLeft: "[", BracketRight: "]", Backslash: "\\",
+        Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/",
+    };
+    if (map[code]) return map[code];
+    if (code.startsWith("Key")) return code.slice(3);
+    if (code.startsWith("Digit")) return code.slice(5);
+    return code;
+}
 
 function setupGlobalShortcut(key: string, win: BrowserWindow): void {
     const accelerator = codeToAccelerator(key);
     globalShortcut.unregisterAll();
+    if (!accelerator) {
+        console.warn(`PTT: "${key}" is a modifier key and cannot be used as a standalone global shortcut. Install uiohook-napi for full key support.`);
+        return;
+    }
     const ok = globalShortcut.register(accelerator, () => handleKeyDown(win));
     if (!ok) console.warn(`PTT: failed to register global shortcut for "${accelerator}"`);
 }

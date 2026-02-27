@@ -28,9 +28,13 @@ export default class ProtocolHandler {
         // XXX: passing args to protocol handlers only works on Windows, so unpackaged deep-linking
         // --profile/--profile-dir are passed via the SEARCH_PARAM var in the callback url
         const args = process.argv.slice(1).filter((arg) => arg !== "--hidden" && arg !== "-hidden");
+        // On Linux AppImages, process.execPath is a temp mount point that vanishes after the app
+        // closes, so XDG registrations pointing to it break SSO callbacks on next launch.
+        // APPIMAGE is set by the AppImage runtime to the actual .AppImage file path.
+        const execPath = process.env.APPIMAGE ?? process.execPath;
         if (app.isPackaged) {
-            app.setAsDefaultProtocolClient(this.protocol, process.execPath, args);
-            app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, process.execPath, args);
+            app.setAsDefaultProtocolClient(this.protocol, execPath, args);
+            app.setAsDefaultProtocolClient(LEGACY_PROTOCOL, execPath, args);
         } else if (process.platform === "win32" || process.platform === "linux") {
             // special handler for running without being packaged, e.g `electron .` by passing our app path to electron
             app.setAsDefaultProtocolClient(this.protocol, process.execPath, [app.getAppPath(), ...args]);
